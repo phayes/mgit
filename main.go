@@ -184,6 +184,11 @@ func Clone() {
 
 		pathParts := strings.Split(strings.Trim(uri.Path, "/"), "/")
 		repos := GitHubRepos(pathParts[0], pathParts[1])
+
+		fmt.Println("Cloning:")
+		for _, repo := range repos {
+			fmt.Println("    " + repo)
+		}
 		CloneRepositories("git@github.com:"+pathParts[0]+"/", repos, rest)
 	}
 }
@@ -201,25 +206,40 @@ func GitHubRepos(user, repopattern string) []string {
 	}
 
 	// First get user repos
-	useropt := &github.RepositoryListOptions{
-		ListOptions: github.ListOptions{PerPage: 100},
-	}
-	userrepos, _, err := client.Repositories.List(user, useropt)
-	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
+	allrepos := make([]github.Repository, 0)
+
+	pnum := 1
+	for {
+		useropt := &github.RepositoryListOptions{
+			ListOptions: github.ListOptions{PerPage: 100, Page: pnum},
+		}
+		userrepos, resp, err := client.Repositories.List(user, useropt)
+		allrepos = append(allrepos, userrepos...)
+		if err != nil {
+			fmt.Println(err.Error())
+			os.Exit(1)
+		}
+		if resp.NextPage != 0 {
+			pnum = resp.NextPage
+		} else {
+			break
+		}
 	}
 
 	// Next get organizational repos -- we don't care about errors
-	orgopt := &github.RepositoryListByOrgOptions{
-		ListOptions: github.ListOptions{PerPage: 100},
+	pnum = 1
+	for {
+		orgopt := &github.RepositoryListByOrgOptions{
+			ListOptions: github.ListOptions{PerPage: 100, Page: pnum},
+		}
+		orgrepos, resp, _ := client.Repositories.ListByOrg(user, orgopt)
+		allrepos = append(allrepos, orgrepos...)
+		if resp.NextPage != 0 {
+			pnum = resp.NextPage
+		} else {
+			break
+		}
 	}
-	orgrepos, _, _ := client.Repositories.ListByOrg(user, orgopt)
-
-	//@@TODO: paginate. Right now this will fail if the user has more than 100 repositories
-
-	// Combine the user and organizational repos into a master list
-	allrepos := append(userrepos, orgrepos...)
 
 	// Our list of repos
 	repos := make([]string, 0)
