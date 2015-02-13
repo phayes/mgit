@@ -185,11 +185,15 @@ func Clone() {
 		pathParts := strings.Split(strings.Trim(uri.Path, "/"), "/")
 		repos := GitHubRepos(pathParts[0], pathParts[1])
 
-		fmt.Println("Cloning:")
-		for _, repo := range repos {
-			fmt.Println("    " + repo)
+		if len(repos) == 0 {
+			fmt.Println("No repositories found. Private repository cloning requires GITHUB_API_TOKEN")
+		} else {
+			fmt.Println("Cloning:")
+			for _, repo := range repos {
+				fmt.Println("    " + repo)
+			}
+			CloneRepositories("git@github.com:"+pathParts[0]+"/", repos, rest)
 		}
-		CloneRepositories("git@github.com:"+pathParts[0]+"/", repos, rest)
 	}
 }
 
@@ -292,8 +296,9 @@ func CloneRepositories(base string, repos []string, args []string) {
 	for i, repo := range repos {
 		fmt.Print(repo + " ")
 		if errmap[repo] != nil {
-			fmt.Println("ERROR")
+			fmt.Print("ERROR")
 		}
+		fmt.Println("")
 
 		out := strings.Split(strings.Trim(results[i], "\n"), "\n")
 		for _, line := range out {
