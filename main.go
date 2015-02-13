@@ -1,12 +1,15 @@
 package main
 
 import (
+	"code.google.com/p/goauth2/oauth"
 	"flag"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
+	"github.com/google/go-github/github"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -17,38 +20,18 @@ var (
 	Args       []string
 )
 
-// Certain git commands are marked as "silent" and will only display "OK" if they suceed.
-// This is to stop the user from being overwhelmed with information when running basic commands
-// This behavior can be overriden by passing the "-v" switch
-var silentCommends []string = []string{
-	"add",
-	"checkout",
-	"commit",
-	"push",
-	"fetch",
-	"merge",
-	"mv",
-	"pull",
-	"push",
-	"rebase",
-	"reset",
-	"rm",
-	"tag",
-}
-
 func Usage() {
 	fmt.Println("multigit - run git commands against many git repositories at once")
 	os.Exit(0)
 }
 
 func main() {
-	spew.Config.DisableMethods = true
 	flag.BoolVar(&OptVerbose, "verbose", false, "be verbose")
 	flag.StringVar(&OptDir, "dir", "", "directory that contains your git repositories")
 	flag.Usage = Usage
 	flag.Parse()
 
-	Args := flag.Args()
+	Args = flag.Args()
 	if len(Args) == 0 {
 		Usage()
 		os.Exit(0)
@@ -59,6 +42,12 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+	}
+
+	// Special-case for git clone
+	if Args[0] == "clone" {
+		Clone()
+		return
 	}
 
 	// List all directories and determine which ones are a git directory
@@ -96,7 +85,7 @@ func main() {
 			cmd := exec.Command("git", Args...)
 			cmd.Dir = dir
 			output, err := cmd.CombinedOutput()
-			if errmap[dir] != nil {
+			if err != nil {
 				numerror++
 			}
 			errmap[dir] = err
@@ -137,4 +126,155 @@ func stringInSlice(a string, list []string) bool {
 		}
 	}
 	return false
+}
+
+func Clone() {
+	var directory, rawuri string
+	var rest []string
+	if len(Args) == 2 {
+		rawuri = Args[1]
+		rest = Args[:1]
+	} else {
+		if strings.Contains(Args[len(Args)-2], "--") {
+			rawuri = Args[len(Args)-1]
+			rest = Args[:len(Args)-1]
+		} else {
+			directory = Args[len(Args)-1]
+			rawuri = Args[len(Args)-2]
+			rest = Args[:len(Args)-2]
+		}
+	}
+
+	// If the rawuri does not contain a *, then do a simple git clone
+	if !strings.Contains(rawuri, "*") {
+		cmd := exec.Command("git", Args...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+		if err != nil {
+			fmt.Println(err.Error())
+			os.Exit(1)
+		}
+	} else { // The string contains a *, it's show time!
+		// Parse the rawuri
+		uri, err := url.Parse(rawuri)
+		if err != nil {
+			fmt.Println(err.Error())
+			os.Exit(1)
+		}
+		if uri.Host == "" {
+			// retry by munging an ssh address into a real URL
+			uri, err = url.Parse("git://" + rawuri)
+			if err != nil {
+				fmt.Println(err.Error())
+				os.Exit(1)
+			}
+			hostparts := strings.Split(uri.Host, ":")
+			if len(hostparts) > 1 {
+				uri.Host = hostparts[0]
+				uri.Path = hostparts[1] + uri.Path
+			}
+		}
+		if uri.Host != "github.com" {
+			fmt.Println("Sorry I don't know how to multi-clone on anything but github. Please open a feature-request if you would like to add support for another provider.")
+			os.Exit(1)
+		}
+		if directory != "" {
+			fmt.Println("Invalid directory for multi-clone")
+			os.Exit(1)
+		}
+
+		pathParts := strings.Split(strings.Trim(uri.Path, "/"), "/")
+		repos := GitHubRepos(pathParts[0], pathParts[1])
+		CloneRepositories("git@github.com:"+pathParts[0]+"/", repos, rest)
+	}
+}
+
+func GitHubRepos(user, repopattern string) []string {
+	var client *github.Client
+	token := os.Getenv("GITHUB_API_TOKEN")
+	if token != "" {
+		t := &oauth.Transport{
+			Token: &oauth.Token{AccessToken: token},
+		}
+		client = github.NewClient(t.Client())
+	} else {
+		client = github.NewClient(nil)
+	}
+
+	rawrepos, _, err := client.Repositories.List(user, nil)
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
+
+	// Our list of repos
+	repos := make([]string, 0)
+
+	// Return everything if there is no repo name
+	if repopattern == "" || repopattern == "*" {
+		for _, repo := range rawrepos {
+			repos = append(repos, *repo.Name)
+		}
+		return repos
+	}
+
+	// For each repo, check if it's in the list of allowed repos as per the pattern
+	for _, repo := range rawrepos {
+		matched, err := filepath.Match(repopattern, *repo.Name)
+		if err != nil {
+			fmt.Println(err.Error())
+			os.Exit(1)
+		}
+		if matched {
+			repos = append(repos, *repo.Name)
+		}
+	}
+	return repos
+}
+
+func CloneRepositories(base string, repos []string, args []string) {
+	// Run the commands
+	var wg sync.WaitGroup
+	results := make([]string, len(repos))
+	errmap := make(map[string]error)
+	numerror := 0
+	for i, repo := range repos {
+		wg.Add(1)
+		go func(i int, repo string) {
+			fullargs := append(args, base+repo)
+			cmd := exec.Command("git", fullargs...)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				numerror++
+			}
+			errmap[repo] = err
+			results[i] = string(output)
+			wg.Done()
+		}(i, repo)
+	}
+	wg.Wait()
+
+	// Report the results
+	for i, repo := range repos {
+		fmt.Print(repo + " ")
+		if errmap[repo] == nil {
+			fmt.Println("OK")
+		} else {
+			fmt.Println("ERROR")
+		}
+
+		out := strings.Split(strings.Trim(results[i], "\n"), "\n")
+		for _, line := range out {
+			fmt.Println("    " + line)
+		}
+		fmt.Println("")
+	}
+
+	// Exit with correct code
+	if numerror == len(repos) {
+		os.Exit(1)
+	} else {
+		os.Exit(0)
+	}
 }
