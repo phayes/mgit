@@ -101,6 +101,7 @@ func main() {
 		if errmap[dir] != nil {
 			fmt.Println("ERROR")
 		}
+		fmt.Println("")
 
 		out := strings.Split(strings.Trim(results[i], "\n"), "\n")
 		for _, line := range out {
