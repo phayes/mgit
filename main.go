@@ -98,9 +98,7 @@ func main() {
 	// Report the results
 	for i, dir := range gitdirs {
 		fmt.Print(dir + " ")
-		if errmap[dir] == nil {
-			fmt.Println("OK")
-		} else {
+		if errmap[dir] != nil {
 			fmt.Println("ERROR")
 		}
 
@@ -202,25 +200,40 @@ func GitHubRepos(user, repopattern string) []string {
 		client = github.NewClient(nil)
 	}
 
-	rawrepos, _, err := client.Repositories.List(user, nil)
+	// First get user repos
+	useropt := &github.RepositoryListOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	userrepos, _, err := client.Repositories.List(user, useropt)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
+
+	// Next get organizational repos -- we don't care about errors
+	orgopt := &github.RepositoryListByOrgOptions{
+		ListOptions: github.ListOptions{PerPage: 100},
+	}
+	orgrepos, _, _ := client.Repositories.ListByOrg(user, orgopt)
+
+	//@@TODO: paginate. Right now this will fail if the user has more than 100 repositories
+
+	// Combine the user and organizational repos into a master list
+	allrepos := append(userrepos, orgrepos...)
 
 	// Our list of repos
 	repos := make([]string, 0)
 
 	// Return everything if there is no repo name
 	if repopattern == "" || repopattern == "*" {
-		for _, repo := range rawrepos {
+		for _, repo := range allrepos {
 			repos = append(repos, *repo.Name)
 		}
 		return repos
 	}
 
 	// For each repo, check if it's in the list of allowed repos as per the pattern
-	for _, repo := range rawrepos {
+	for _, repo := range allrepos {
 		matched, err := filepath.Match(repopattern, *repo.Name)
 		if err != nil {
 			fmt.Println(err.Error())
@@ -258,9 +271,7 @@ func CloneRepositories(base string, repos []string, args []string) {
 	// Report the results
 	for i, repo := range repos {
 		fmt.Print(repo + " ")
-		if errmap[repo] == nil {
-			fmt.Println("OK")
-		} else {
+		if errmap[repo] != nil {
 			fmt.Println("ERROR")
 		}
 
