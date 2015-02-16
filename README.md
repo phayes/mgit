@@ -24,8 +24,8 @@ $ echo "export GITHUB_API_TOKEN=MyGithubApiKeyGoesHere" >> ~/.bash_profile && so
 To clone multiple private github repositories using wildcare (`*`) notation, you need provide mgit an API token. 
 
 1. Visit https://github.com/settings/applications
-2. Under "Personal access tokens" click "Generate New Token" and give it the "repo" permission
+2. Under `Personal access tokens` click `Generate New Token` and give it the `repo` permission
 3. Copy the api token provided
-4. Edit your bash profile and add `export GITHUB_API_TOKEN=abc123` but replace abc123 with the token
+4. Edit your bash profile and add `export GITHUB_API_TOKEN=abc123` but replace `abc123` with the token
 5. You will need to restart your bash session for settings to take effect. Alternatively run `source ~/.bash_profile`
  
