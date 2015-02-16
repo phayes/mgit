@@ -19,7 +19,7 @@ $ sudo chmod a+x /usr/bin
 $ echo "export GITHUB_API_TOKEN=MyGithubApiKeyGoesHere" >> ~/.bash_profile && source ~/.bash_profile # for github integration
 ```
 
-### Github integration
+### github integration
 
 To clone multiple private github repositories using wildcare (`*`) notation, you need provide mgit an API token. 
 
