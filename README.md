@@ -2,7 +2,7 @@
 
 Work on multiple git repositories at the same time.
 
-## example usage
+### example usage
 
 ```bash
 $ mgit clone git@github.com/phayes/* # check out all phayes repositories
