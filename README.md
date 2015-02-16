@@ -16,5 +16,5 @@ $ wget "https://phayes.github.io/bin/current/mgit/linux/mgit.gz" #replace `linux
 $ gunzip mgit.gz
 $ sudo cp mgit /usr/bin     
 $ sudo chmod a+x /usr/bin
-$ echo "export GITHUB_API_TOKEN=mygithubapitoken" >> ~/.bash_profile
+$ echo "export GITHUB_API_TOKEN=mygithubapitoken" >> ~/.bash_profile && source ~/.profile # for github integration
 ```
