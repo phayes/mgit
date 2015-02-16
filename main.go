@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 var (
@@ -20,6 +22,13 @@ var (
 	Args       []string
 )
 
+// Number of concurrent clones at the same time.
+var NumConcurrentClones = 12
+
+// A mutex to protect output to the console so we don't get gobligook when multiple goroutines write at once
+var OutMux = sync.Mutex{}
+
+// Print help usage info
 func Usage() {
 	fmt.Println("multigit - run git commands against many git repositories at once")
 	os.Exit(0)
@@ -103,9 +112,16 @@ func main() {
 		}
 		fmt.Println("")
 
-		out := strings.Split(strings.Trim(results[i], "\n"), "\n")
-		for _, line := range out {
-			fmt.Println("    " + line)
+		out := strings.Trim(results[i], "\n")
+		if out != "" {
+			outlines := strings.Split(out, "\n")
+			for _, line := range outlines {
+				fmt.Println("    " + line)
+			}
+		} else {
+			if errmap[dir] != nil {
+				fmt.Println("    " + errmap[dir].Error())
+			}
 		}
 		fmt.Println("")
 	}
@@ -273,43 +289,59 @@ func GitHubRepos(user, repopattern string) []string {
 
 func CloneRepositories(base string, repos []string, args []string) {
 	// Run the commands
-	var wg sync.WaitGroup
-	results := make([]string, len(repos))
-	errmap := make(map[string]error)
-	numerror := 0
-	for i, repo := range repos {
+	ch := make(chan string)
+	wg := sync.WaitGroup{}
+	var numerror int64 = 0
+	for n := 0; n < NumConcurrentClones; n++ {
 		wg.Add(1)
-		go func(i int, repo string) {
-			fullargs := append(args, base+repo)
-			cmd := exec.Command("git", fullargs...)
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				numerror++
+		go func() {
+			for {
+				select {
+				case repo, ok := <-ch:
+					if !ok {
+						wg.Done()
+						return
+					}
+					cmd := exec.Command("git", append(args, base+repo)...)
+					output, err := cmd.CombinedOutput()
+					if err != nil {
+						atomic.AddInt64(&numerror, 1)
+					}
+
+					// Report output
+					OutMux.Lock()
+					fmt.Print(repo + " ")
+					if err != nil {
+						fmt.Print("ERROR")
+					}
+					fmt.Println("")
+					outstr := strings.Trim(string(output), "\n")
+					if outstr != "" {
+						outlines := strings.Split(outstr, "\n")
+						for _, line := range outlines {
+							fmt.Println("    " + line)
+						}
+					} else {
+						fmt.Println("    " + err.Error())
+					}
+					fmt.Println("")
+					OutMux.Unlock()
+				default:
+					time.Sleep(10 * time.Millisecond)
+				}
 			}
-			errmap[repo] = err
-			results[i] = string(output)
-			wg.Done()
-		}(i, repo)
+		}()
 	}
+
+	// Feed values into channels
+	for _, repo := range repos {
+		ch <- repo
+	}
+	close(ch)
 	wg.Wait()
 
-	// Report the results
-	for i, repo := range repos {
-		fmt.Print(repo + " ")
-		if errmap[repo] != nil {
-			fmt.Print("ERROR")
-		}
-		fmt.Println("")
-
-		out := strings.Split(strings.Trim(results[i], "\n"), "\n")
-		for _, line := range out {
-			fmt.Println("    " + line)
-		}
-		fmt.Println("")
-	}
-
 	// Exit with correct code
-	if numerror == len(repos) {
+	if numerror == int64(len(repos)) {
 		os.Exit(1)
 	} else {
 		os.Exit(0)
